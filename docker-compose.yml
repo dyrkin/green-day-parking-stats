@@ -1,0 +1,29 @@
+version: '3.4'
+services:
+  gd_stats:
+    image: docker:5000/gd-parking-stats:1
+    ports:
+      - "2112:2112"
+    restart: unless-stopped
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - '3000:3000'
+    volumes:
+      - grafana:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=${DOT_ENV_GRAFANA_ADMIN_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${DOT_ENV_GRAFANA_ADMIN_PASSWORD}
+    restart: unless-stopped
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - "./prometheus.yml:/etc/prometheus/prometheus.yml"
+    ports:
+      - 9090:9090
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run --token ${DOT_ENV_CLOUDFLARE_TUNNEL_TOKEN}
+
+volumes:
+  grafana:
