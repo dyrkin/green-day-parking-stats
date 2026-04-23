@@ -8,13 +8,42 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"log"
 	"net/http"
+	"sync"
 )
 
 const (
 	universityParkingURL = "https://gd.zaparkuj.pl/api/freegroupcountervalue-green.json"
 	greenDayParkingURL   = "https://gd.zaparkuj.pl/api/freegroupcountervalue.json"
 	port                 = ":2112"
+	maxAllowedIncrease = 10.0
 )
+
+type anomalyFilter struct {
+	mu        sync.Mutex
+	lastValue float64
+	hasValue  bool
+}
+
+func (f *anomalyFilter) filter(name string, newValue float64) float64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if !f.hasValue {
+		f.lastValue = newValue
+		f.hasValue = true
+		return newValue
+	}
+
+	increase := newValue - f.lastValue
+	if increase > maxAllowedIncrease {
+		log.Printf("Anomaly detected for %s: value jumped from %.0f to %.0f (increase=%.0f > threshold=%.0f); keeping previous value",
+			name, f.lastValue, newValue, increase, maxAllowedIncrease)
+		return f.lastValue
+	}
+
+	f.lastValue = newValue
+	return newValue
+}
 
 func main() {
 	registry := prometheus.NewRegistry()
@@ -29,6 +58,7 @@ func main() {
 }
 
 func registerGauge(registry *prometheus.Registry, name, help, url string) {
+	filter := &anomalyFilter{}
 	gaugeFunc := prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 		Name: name,
 		Help: help,
@@ -38,7 +68,7 @@ func registerGauge(registry *prometheus.Registry, name, help, url string) {
 			log.Printf("Error fetching parking data for %s: %v", name, err)
 			return 0
 		}
-		return res
+		return filter.filter(name, res)
 	})
 	registry.MustRegister(gaugeFunc)
 }
